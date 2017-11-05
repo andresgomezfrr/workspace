@@ -92,10 +92,7 @@ public class SparkMainForEachWriter {
 		 
 		LogManager.getLogger("org.apache.spark").setLevel(Level.WARN);
 		LogManager.getLogger("akka").setLevel(Level.ERROR);
-		String windowDuration = 3 + " seconds";//CCS 30 minutos
-		String slideDuration = 1 + " seconds"; //CCS 3 minutos
-
-		
+			
 
 		SparkConf conf = new SparkConf().setAppName("sparkprocess").setMaster("local[*]");
 		SparkSession sparkSession = SparkSession.builder().config(conf).getOrCreate();
