@@ -29,7 +29,7 @@ public class WriterForEach  extends ForeachWriter<Row> implements Serializable{
 	@Override
 	public boolean open(long arg0, long arg1) {
 		this.mongoclient = new MongoClient(mongodbIp, 27017);
-		return false;
+		return true;
 	}
 
 	@Override

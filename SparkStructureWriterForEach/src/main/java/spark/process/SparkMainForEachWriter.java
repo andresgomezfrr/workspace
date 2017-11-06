@@ -4,6 +4,7 @@ import com.databricks.spark.avro.SchemaConverters;
 import com.twitter.bijection.Injection;
 import com.twitter.bijection.avro.GenericAvroCodecs;
 
+import org.apache.spark.sql.streaming.*;
 import scala.Function1;
 import scala.collection.Seq;
 import scala.collection.TraversableOnce;
@@ -38,9 +39,6 @@ import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.functions;
 
-import org.apache.spark.sql.streaming.DataStreamWriter;
-import org.apache.spark.sql.streaming.StreamingQuery;
-import org.apache.spark.sql.streaming.StreamingQueryException;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
@@ -50,8 +48,6 @@ import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
 import com.mongodb.MongoClient;
-
-import org.apache.spark.sql.streaming.ProcessingTime;
 
 import org.apache.spark.sql.SparkSession.implicits$;
 import org.apache.spark.SparkConf.*;
@@ -68,7 +64,7 @@ public class SparkMainForEachWriter {
 	private static String dbName = "wdb";
 	private static String collectionName = "wtable";
 	private static StructType type;
-	public static String IPKAFKA="34.201.106.47";
+	public static String IPKAFKA="192.168.1.106:9092";
 	
 	public static String KAFKA_HOST = IPKAFKA+":9090,"+IPKAFKA+":9091,"+IPKAFKA+":9092";
 	public static String TOPIC = "wtopic";
@@ -89,29 +85,22 @@ public class SparkMainForEachWriter {
 	}
 
 	public static void main(String[] args) throws StreamingQueryException, Exception {
-		 
-		LogManager.getLogger("org.apache.spark").setLevel(Level.WARN);
-		LogManager.getLogger("akka").setLevel(Level.ERROR);
-			
-
 		SparkConf conf = new SparkConf().setAppName("sparkprocess").setMaster("local[*]");
 		SparkSession sparkSession = SparkSession.builder().config(conf).getOrCreate();
-		JavaSparkContext jsc = new JavaSparkContext(sparkSession.sparkContext());
-
 	
 		sparkSession.sqlContext().setConf("spark.sql.shuffle.partitions", "3");
 
 	
-		Dataset<Row> ds1 = sparkSession.readStream().format("kafka").option("kafka.bootstrap.servers", KAFKA_HOST)
+		Dataset<Row> ds1 = sparkSession.readStream().format("kafka").option("kafka.bootstrap.servers", IPKAFKA)
 				.option("subscribe", TOPIC).option("startingOffsets", "earliest").load();
 
 		
 		sparkSession.udf().register("deserialize", (byte[] data) -> {
 			GenericRecord record = recordInjection.invert(data).get();
-			return RowFactory.create(record.get("id"), record.get("lon").toString(), record.get("lat").toString(),
-					record.get("temp").toString(), record.get("pressure").toString(), record.get("humidity").toString(),
-					record.get("temp_min").toString(), record.get("temp_max").toString(),
-					record.get("datetime").toString());
+			return RowFactory.create(record.get("id"), record.get("lon"), record.get("lat"),
+					record.get("temp"), record.get("pressure"), record.get("humidity"),
+					record.get("temp_min"), record.get("temp_max"),
+					record.get("datetime"));
 
 		}, DataTypes.createStructType(type.fields()));
 		
@@ -120,25 +109,24 @@ public class SparkMainForEachWriter {
 		Dataset<Row> ds2 = ds1.select("value").as(Encoders.BINARY()).selectExpr("deserialize(value) as rows")
 				.select("rows.*");
 
+
 		ds2.printSchema();
 		Dataset<Row> ds3 = ds2.groupBy(ds2.col("id"),ds2.col("lon"),ds2.col("lat"))
 				.max("temp").alias("maxtemp");
 		ds3.printSchema();
-		System.out.println(ds3.select(ds3.col("id").toString()));
-		
-		WriterForEach writermine= new WriterForEach();
-		StreamingQuery query2 = ds3
-				.select(ds3.col("id").alias("idCity").cast("Integer"),
+
+		StreamingQuery query2 =
+				ds3
+				.select(ds3.col("id").alias("idCity"),
 				ds3.col("lon").alias("Longitud").cast("Double"),
 				ds3.col("lat").alias("Latitud").cast("Double"),
 				ds3.col("max(temp)"))
 				.writeStream()
-				.foreach(writermine)
-				.outputMode("complete")
-				.trigger(ProcessingTime.create(1, TimeUnit.SECONDS))					
+				.foreach(new WriterForEach())
+				.outputMode(OutputMode.Complete())
+				.trigger(ProcessingTime.create(1, TimeUnit.SECONDS))
 				.start();
 
-
-
+		query2.awaitTermination();
 	}
 }
